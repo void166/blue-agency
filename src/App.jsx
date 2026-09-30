@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Playground from './Playground.jsx';
 
 const image = (number) => `/images/blue-${number}.webp`;
 
@@ -42,7 +43,7 @@ function MediaTile({ number, className = '', label = '' }) {
   return <div className={`media-tile ${className}`}><img src={image(number)} alt={label || `BLUE creative visual ${number}`} loading="lazy" />{label && <span>{label}</span>}</div>;
 }
 
-export default function App() {
+function ClassicApp() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeQuestion, setActiveQuestion] = useState(null);
   const [contactOpen, setContactOpen] = useState(false);
@@ -91,6 +92,13 @@ export default function App() {
   }, [loading]);
 
   useEffect(() => {
+    if (loading) return;
+    const id = window.location.hash.slice(1);
+    if (id && id !== 'top') document.getElementById(id)?.scrollIntoView();
+    else window.scrollTo(0, 0);
+  }, [loading]);
+
+  useEffect(() => {
     if (!('IntersectionObserver' in window)) return;
     const observer = new IntersectionObserver(entries => entries.forEach(entry => {
       if (entry.isIntersecting) { entry.target.classList.add('visible'); observer.unobserve(entry.target); }
@@ -119,7 +127,7 @@ export default function App() {
         <span className="header-id">INDEPENDENT CREATIVE AGENCY / ULAANBAATAR</span>
         <button className="menu-toggle" type="button" aria-label={menuOpen ? 'Цэс хаах' : 'Цэс нээх'} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? 'CLOSE ×' : 'MENU +'}</button>
         <nav className={menuOpen ? 'site-nav open' : 'site-nav'} aria-label="Үндсэн цэс" onClick={event => { if (event.target.closest('a')) setMenuOpen(false); }}>
-          <a href="#about">ABOUT</a><a href="#work">WORK</a><a href="#services">SERVICES</a><a href="#contact">CONTACT ↗</a>
+          <a href="#playground">BLUE PLAYGROUND ↗</a><a href="#about">ABOUT</a><a href="#work">WORK</a><a href="#services">SERVICES</a><a href="#contact">CONTACT ↗</a>
         </nav>
       </header>
 
@@ -170,4 +178,14 @@ export default function App() {
       <footer><span>BLUE® / ULAANBAATAR</span><span>GOOD IDEAS DON'T WHISPER.</span><a href="#top">BACK TO TOP ↑</a><span>© {new Date().getFullYear()} BLUE</span></footer>
     </div>
   </>;
+}
+
+export default function App() {
+  const [playground, setPlayground] = useState(() => window.location.hash === '#playground');
+  useEffect(() => {
+    const change = () => setPlayground(window.location.hash === '#playground');
+    window.addEventListener('hashchange', change);
+    return () => window.removeEventListener('hashchange', change);
+  }, []);
+  return playground ? <Playground /> : <ClassicApp />;
 }
