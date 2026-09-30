@@ -19,6 +19,8 @@ export default function Playground() {
   const menuRef = useRef(null);
   const detailRef = useRef(null);
   const drag = useRef(null);
+  const positions = useRef(new Map());
+  const suppressClick = useRef(false);
   const [progress, setProgress] = useState(0);
   const [slide, setSlide] = useState(0);
   const [service, setService] = useState(0);
@@ -35,6 +37,7 @@ export default function Playground() {
     const wheel = e => {
       if (e.ctrlKey || e.target.closest('dialog')) return;
       e.preventDefault();
+      if (drag.current?.object) return;
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
       el.scrollLeft += delta * (e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? el.clientWidth : 1);
     };
@@ -62,32 +65,84 @@ export default function Playground() {
   }
   function nudge(direction) { scroller.current.scrollBy({ left: direction * scroller.current.clientWidth * .7, behavior: 'smooth' }); }
   function pointerDown(e) {
-    if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('button,a,input')) return;
+    if (e.button !== 0 || drag.current) return;
+    const object = e.target.closest('.pg-sticker,.pg-orb,.pg-photo,.pg-big-link,.pg-world h1,.pg-system h2,.pg-world-tag button,.pg-end-photo');
+    suppressClick.current = false;
+    if (object) {
+      const position = positions.current.get(object) || { x: 0, y: 0 };
+      const rect = object.getBoundingClientRect();
+      const canvas = object.closest('.pg-canvas').getBoundingClientRect();
+      drag.current = { object, x: e.clientX, y: e.clientY, position, moved: false, pointerId: e.pointerId,
+        minX: Math.min(0, canvas.left - rect.left + position.x), maxX: Math.max(0, canvas.right - rect.right + position.x),
+        minY: Math.min(0, canvas.top - rect.top + position.y), maxY: Math.max(0, canvas.bottom - rect.bottom + position.y) };
+      object.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (e.pointerType !== 'mouse' || e.target.closest('button,a,input')) return;
     drag.current = { x: e.clientX, left: scroller.current.scrollLeft, moved: false };
     scroller.current.setPointerCapture(e.pointerId);
     scroller.current.classList.add('dragging');
   }
   function pointerMove(e) {
     if (!drag.current) return;
+    const current = drag.current;
+    if (current.object) {
+      if (e.pointerId !== current.pointerId) return;
+      const dx = e.clientX - current.x, dy = e.clientY - current.y;
+      if (!current.moved && Math.hypot(dx, dy) < 6) return;
+      current.moved = true;
+      suppressClick.current = true;
+      current.object.classList.add('pg-moving');
+      const position = {
+        x: Math.max(current.minX, Math.min(current.maxX, current.position.x + dx)),
+        y: Math.max(current.minY, Math.min(current.maxY, current.position.y + dy)),
+      };
+      positions.current.set(current.object, position);
+      current.object.style.translate = `${position.x}px ${position.y}px`;
+      current.object.style.zIndex = '8';
+      return;
+    }
     const delta = e.clientX - drag.current.x;
     if (Math.abs(delta) > 5) drag.current.moved = true;
     scroller.current.scrollLeft = drag.current.left - delta;
   }
-  function pointerUp() { drag.current = null; scroller.current.classList.remove('dragging'); }
+  function pointerUp() {
+    drag.current?.object?.classList.remove('pg-moving');
+    drag.current = null;
+    scroller.current.classList.remove('dragging');
+  }
+  function resetLayout() {
+    pointerUp();
+    for (const object of positions.current.keys()) { object.style.translate = ''; object.style.zIndex = ''; }
+    positions.current.clear();
+    suppressClick.current = false;
+  }
+  function objectKeyDown(e) {
+    const object = e.target.closest('.pg-sticker,.pg-orb,.pg-photo,.pg-big-link,.pg-world-tag button');
+    if (!e.altKey || !object || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
+    e.preventDefault(); e.stopPropagation();
+    const position = positions.current.get(object) || { x: 0, y: 0 };
+    const delta = e.shiftKey ? 40 : 12;
+    const rect = object.getBoundingClientRect(), canvas = object.closest('.pg-canvas').getBoundingClientRect();
+    const x = position.x + (e.key === 'ArrowRight' ? delta : e.key === 'ArrowLeft' ? -delta : 0);
+    const y = position.y + (e.key === 'ArrowDown' ? delta : e.key === 'ArrowUp' ? -delta : 0);
+    const next = { x: Math.max(Math.min(0,canvas.left-rect.left+position.x),Math.min(Math.max(0,canvas.right-rect.right+position.x),x)), y: Math.max(Math.min(0,canvas.top-rect.top+position.y),Math.min(Math.max(0,canvas.bottom-rect.bottom+position.y),y)) };
+    positions.current.set(object,next); object.style.translate = `${next.x}px ${next.y}px`; object.style.zIndex = '8';
+  }
 
   return <div className="playground">
     {intro && <div className="pg-intro" aria-hidden="true"><span>BLUE®</span><small>A DIFFERENT WAY TO MAKE WAVES →</small></div>}
     <header className="pg-header"><button className="pg-menu-button" onClick={() => setMenu(true)} aria-label="Open playground menu"><span /><span /><span /></button><a className="pg-logo" href="#top" aria-label="Return to BLUE Studio">BLUE<sup>®</sup></a><p>THE NEXT BIG IDEA<br />COULD BE YOURS.</p><button className="pg-oval" onClick={() => go('pg-end')}>LET'S TALK! ✳</button></header>
-    <main className="pg-scroll" ref={scroller} tabIndex={0} aria-label="BLUE horizontal playground. Scroll, drag, or use arrow keys to explore." onScroll={() => { const el = scroller.current; setProgress(el.scrollLeft / (el.scrollWidth - el.clientWidth || 1)); }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp} onKeyDown={e => { if (e.target !== e.currentTarget) return; if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); nudge(e.key === 'ArrowRight' ? 1 : -1); } if(e.key === 'Home') {e.preventDefault();go('pg-start');} if(e.key === 'End') {e.preventDefault();go('pg-end');} }}>
+    <main onClickCapture={e => { if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false; } }} onKeyDownCapture={objectKeyDown} className="pg-scroll" ref={scroller} tabIndex={0} aria-label="BLUE horizontal playground. Scroll, drag, or use arrow keys to explore." onScroll={() => { const el = scroller.current; setProgress(el.scrollLeft / (el.scrollWidth - el.clientWidth || 1)); }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp} onKeyDown={e => { if (e.target !== e.currentTarget) return; if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); nudge(e.key === 'ArrowRight' ? 1 : -1); } if(e.key === 'Home') {e.preventDefault();go('pg-start');} if(e.key === 'End') {e.preventDefault();go('pg-end');} }}>
       <div className="pg-canvas">
-        <section className="pg-object" id="pg-start" aria-label="BLUE creative studio"><div className="pg-orb"><div className="pg-orb-glint" /><span>BLUE</span><small>IDEAS WITH<br />A PULSE.</small><i>✳</i></div><Sticker className="pg-club" onClick={() => go('pg-end')} label="Start a project"><strong>BLUE<br /><em>Creative Club</em></strong><small>YOUR NEXT BIG THING<br />STARTS RIGHT HERE</small><b>LET'S MAKE IT ↗</b></Sticker><span className="pg-object-label">Independent creative agency ↗<br />ULAANBAATAR / EVERYWHERE</span></section>
+        <section className="pg-object" id="pg-start" aria-label="BLUE creative studio"><div className="pg-orb" tabIndex={0} role="group" aria-label="BLUE sculpture. Drag or use Alt and arrow keys to move."><div className="pg-orb-glint" /><span>BLUE</span><small>IDEAS WITH<br />A PULSE.</small><i>✳</i></div><Sticker className="pg-club" onClick={() => go('pg-end')} label="Start a project"><strong>BLUE<br /><em>Creative Club</em></strong><small>YOUR NEXT BIG THING<br />STARTS RIGHT HERE</small><b>LET'S MAKE IT ↗</b></Sticker><span className="pg-object-label">Independent creative agency ↗<br />ULAANBAATAR / EVERYWHERE</span></section>
         <section className="pg-collection" id="pg-collection" aria-label="Creative collection"><span className="pg-kicker">B26 <span>↗</span></span><button className="pg-big-link" onClick={() => setDetail(projects[slide])}>COLLECTION</button><div className="pg-discipline-links">{disciplines.map((name,i) => <React.Fragment key={name}><button onClick={() => {setService(i);go('pg-system');}}>{name}</button>{i < 3 && ' / '}</React.Fragment>)}</div><span className="pg-small-caption">HERE'S OUR CREATIVE MENU</span><Sticker className="pg-small-sticker" onClick={() => go('pg-system')} label="Explore BLUE services">BIG IDEAS<br /><small>NO SMALL THINKING</small>↗</Sticker></section>
         <section className="pg-world" id="pg-world" aria-label="BLUE world"><span className="pg-kicker">◎ FOR THE CURIOUS PEOPLE</span><h1>BLUE WORLD</h1><Sticker className="pg-world-sticker" onClick={() => setDetail(projects[2])} label="Explore Object concept"><span>◎</span><strong>BLUE [UNVRS]</strong><small>INDEPENDENT IDEAS<br />UNLIMITED POSSIBILITIES</small></Sticker><div className="pg-world-tag"><small>WE GIVE IDEAS A VOICE<br />@BLUE / CREATIVE STUDIO</small><button onClick={() => go('pg-system')}>BLUE<span>✦</span></button><span>✧ &nbsp; ☺</span></div><div className="pg-photo-strip"><button className="pg-photo pg-portrait" onClick={() => setDetail(projects[1])}><img src={img(2)} alt="BLUE FRAME portrait concept" draggable="false"/><span>FRAME / CULTURE ↗</span></button><button className="pg-photo pg-changing" onClick={() => setDetail(projects[slide])}><img key={slide} src={img(projects[slide].image)} alt={`${projects[slide].title} creative concept`} draggable="false"/><span>{projects[slide].title} / CONCEPT ↗</span><i>BLUE BLUE BLUE BLUE</i></button><button className="pg-photo" onClick={() => setDetail(projects[3])}><img src={img(6)} alt="BLUE digital motion concept" draggable="false"/><span>DIGITAL / NEW DIMENSIONS ↗</span></button></div><div className="pg-gallery-controls"><span>CONCEPT WORK / {String(slide+1).padStart(2,'0')}</span><div>{projects.map((p,i) => <button key={p.title} className={slide===i?'active':''} aria-label={`Show ${p.title}`} aria-pressed={slide===i} onClick={() => setSlide(i)} />)}<button className="pg-pause" onClick={() => setPaused(!paused)} aria-label={paused?'Play gallery':'Pause gallery'}>{paused?'▶':'Ⅱ'}</button></div></div></section>
         <section className="pg-system" id="pg-system" aria-label="Creative services"><h2>FAST,<br /><i>GOOD</i><br />& LOUD.</h2><Sticker className="pg-system-sticker" onClick={() => go('pg-end')} label="Discuss a creative project">MAKE<br />WAVES ✳</Sticker><div className="pg-service-tabs" role="tablist" aria-label="Creative disciplines">{disciplines.map((name,i)=><button role="tab" tabIndex={service===i?0:-1} id={`pg-tab-${i}`} aria-selected={service===i} aria-controls="pg-service-panel" className={service===i?'active':''} key={name} onClick={() => setService(i)} onKeyDown={e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const next=(i+(e.key==='ArrowRight'?1:3))%4;setService(next);document.getElementById(`pg-tab-${next}`).focus();}}}>{name}</button>)}</div><div className="pg-service-panel" id="pg-service-panel" role="tabpanel" aria-labelledby={`pg-tab-${service}`}><strong>0{service+1} / {disciplines[service]}</strong><p>{['Брэндийн чиглэл. Судалгаа, байршуулалт, хүчтэй санаа.','Брэндийн дүр. Визуал систем, арт директор, дизайн.','Дэлгэцэнд амилуулах. Веб, интерактив туршлага, motion.','Хүмүүст хүргэх. Кампанит санаа, контент, олон суваг.'][service]}</p></div></section>
         <section className="pg-end" id="pg-end" aria-label="Work with BLUE"><div className="pg-end-photo"><img src={img(9)} alt="BLUE future creative concept" draggable="false"/><span>THE FUTURE IS BLUE.</span></div><h2>YOUR IDEA.<br />OUR ENERGY.</h2><a href="#contact" className="pg-end-cta">START SOMETHING ↗</a><a href="#top" className="pg-return">← BACK TO BLUE STUDIO</a><small>ONE STUDIO. MANY WAYS TO MAKE WAVES.</small></section>
       </div>
     </main>
-    <footer className="pg-footer"><nav aria-label="Playground sections"><button onClick={()=>go('pg-collection')}>COLLECTION</button><button onClick={()=>go('pg-world')}>BLUE WORLD</button><button onClick={()=>go('pg-system')}>SERVICES</button><a href="#top">STUDIO ↗</a><button onClick={()=>go('pg-end')}>LET'S TALK</button></nav><div className="pg-scroll-controls"><span>DRAG / SCROLL →</span><button onClick={()=>nudge(-1)} aria-label="Scroll left">←</button><button onClick={()=>nudge(1)} aria-label="Scroll right">→</button></div><div className="pg-progress"><span style={{width:`${Math.max(2,progress*100)}%`}} /></div></footer>
+    <footer className="pg-footer"><nav aria-label="Playground sections"><button onClick={()=>go('pg-collection')}>COLLECTION</button><button onClick={()=>go('pg-world')}>BLUE WORLD</button><button onClick={()=>go('pg-system')}>SERVICES</button><a href="#top">STUDIO ↗</a><button onClick={()=>go('pg-end')}>LET'S TALK</button></nav><div className="pg-scroll-controls"><button className="pg-reset" onClick={resetLayout} title="Reset all moved objects" aria-label="Reset object positions">RESET ↺</button><span>MOVE / SCROLL →</span><button onClick={()=>nudge(-1)} aria-label="Scroll left">←</button><button onClick={()=>nudge(1)} aria-label="Scroll right">→</button></div><div className="pg-progress"><span style={{width:`${Math.max(2,progress*100)}%`}} /></div></footer>
     <dialog className="pg-menu" aria-label="Playground navigation" ref={menuRef} onCancel={()=>setMenu(false)} onClick={e=>{if(e.target===e.currentTarget)setMenu(false)}}><div className="pg-dialog-top"><span>BLUE® / CHOOSE YOUR WORLD</span><button onClick={()=>setMenu(false)} aria-label="Close menu">×</button></div><a href="#top">BLUE STUDIO ↗<small>THE ORIGINAL EXPERIENCE</small></a><button onClick={()=>{go('pg-start')}}>PLAYGROUND →<small>THE HORIZONTAL EXPERIENCE</small></button><button onClick={()=>go('pg-collection')}>COLLECTION</button><button onClick={()=>go('pg-system')}>SERVICES</button><button onClick={()=>go('pg-end')}>LET'S TALK ↗</button></dialog>
     <dialog className="pg-detail" aria-label="Creative project detail" ref={detailRef} onCancel={()=>setDetail(null)} onClick={e=>{if(e.target===e.currentTarget)setDetail(null)}}>{detail&&<><div className="pg-dialog-top"><span>{detail.tag} / CONCEPT WORK</span><button onClick={()=>setDetail(null)} aria-label="Close project">×</button></div><img src={img(detail.image)} alt={`${detail.title} concept in detail`}/><h2>{detail.title}</h2><p>{detail.copy}</p><a href="#contact">LET'S MAKE YOURS ↗</a></>}</dialog>
   </div>;
